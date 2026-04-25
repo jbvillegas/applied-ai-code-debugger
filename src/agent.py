@@ -254,66 +254,6 @@ class DebugAgent:
         if self.session_file:
             self._save_session()
         return {
-                def _lint_code(self, code: str) -> dict:
-                    """
-                    Run flake8 and pylint on the code and return results.
-                    """
-                    result = {}
-                    try:
-                        with open(".tmp_lint.py", "w") as f:
-                            f.write(code)
-                        flake8 = subprocess.run(["flake8", ".tmp_lint.py"], capture_output=True, text=True)
-                        pylint = subprocess.run(["pylint", "--disable=all", "--enable=errors", ".tmp_lint.py"], capture_output=True, text=True)
-                        result["flake8"] = flake8.stdout + flake8.stderr
-                        result["pylint"] = pylint.stdout + pylint.stderr
-                    except Exception as e:
-                        result["error"] = str(e)
-                    finally:
-                        try:
-                            os.remove(".tmp_lint.py")
-                        except Exception:
-                            pass
-                    return result
-
-                def _security_audit(self, code: str) -> dict:
-                    """
-                    Run bandit security scan on the code and return results.
-                    """
-                    result = {}
-                    try:
-                        with open(".tmp_bandit.py", "w") as f:
-                            f.write(code)
-                        bandit = subprocess.run(["bandit", "-r", ".tmp_bandit.py", "-f", "json"], capture_output=True, text=True)
-                        result["bandit"] = bandit.stdout + bandit.stderr
-                    except Exception as e:
-                        result["error"] = str(e)
-                    finally:
-                        try:
-                            os.remove(".tmp_bandit.py")
-                        except Exception:
-                            pass
-                    return result
-
-                def _save_session(self):
-                    try:
-                        with open(self.session_file, "wb") as f:
-                            pickle.dump({
-                                "history": self.history,
-                                "metrics": self.metrics
-                            }, f)
-                    except Exception as e:
-                        if self.verbose:
-                            print(f"[SESSION SAVE ERROR] {e}")
-
-                def _load_session(self):
-                    try:
-                        with open(self.session_file, "rb") as f:
-                            data = pickle.load(f)
-                            self.history = data.get("history", [])
-                            self.metrics = data.get("metrics", self.metrics)
-                    except Exception as e:
-                        if self.verbose:
-                            print(f"[SESSION LOAD ERROR] {e}")
             "final_code": best["proposed_fix"] if best else code,
             "success": False,
             "attempts": self.max_attempts,
@@ -322,6 +262,66 @@ class DebugAgent:
             "metrics": self.metrics
         }
 
+    def _lint_code(self, code: str) -> dict:
+        """
+        Run flake8 and pylint on the code and return results.
+        """
+        result = {}
+        try:
+            with open(".tmp_lint.py", "w") as f:
+                f.write(code)
+            flake8 = subprocess.run(["flake8", ".tmp_lint.py"], capture_output=True, text=True)
+            pylint = subprocess.run(["pylint", "--disable=all", "--enable=errors", ".tmp_lint.py"], capture_output=True, text=True)
+            result["flake8"] = flake8.stdout + flake8.stderr
+            result["pylint"] = pylint.stdout + pylint.stderr
+        except Exception as e:
+            result["error"] = str(e)
+        finally:
+            try:
+                os.remove(".tmp_lint.py")
+            except Exception:
+                pass
+        return result
+
+    def _security_audit(self, code: str) -> dict:
+        """
+        Run bandit security scan on the code and return results.
+        """
+        result = {}
+        try:
+            with open(".tmp_bandit.py", "w") as f:
+                f.write(code)
+            bandit = subprocess.run(["bandit", "-r", ".tmp_bandit.py", "-f", "json"], capture_output=True, text=True)
+            result["bandit"] = bandit.stdout + bandit.stderr
+        except Exception as e:
+            result["error"] = str(e)
+        finally:
+            try:
+                os.remove(".tmp_bandit.py")
+            except Exception:
+                pass
+        return result
+
+    def _save_session(self):
+        try:
+            with open(self.session_file, "wb") as f:
+                pickle.dump({
+                    "history": self.history,
+                    "metrics": self.metrics
+                }, f)
+        except Exception as e:
+            if self.verbose:
+                print(f"[SESSION SAVE ERROR] {e}")
+
+    def _load_session(self):
+        try:
+            with open(self.session_file, "rb") as f:
+                data = pickle.load(f)
+                self.history = data.get("history", [])
+                self.metrics = data.get("metrics", self.metrics)
+        except Exception as e:
+            if self.verbose:
+                print(f"[SESSION LOAD ERROR] {e}")
     def _test_code(self, code: str) -> dict:
         """
         Test code using safe_execute and/or user test cases.
