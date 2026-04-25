@@ -1,4 +1,8 @@
 import time
+import pickle
+import os
+import subprocess
+import tracemalloc
 from .guardrails import is_safe
 from .tester import safe_execute
 from .debugger import request_fix
@@ -26,7 +30,9 @@ class DebugAgent:
         adaptive_attempts: bool = False,
         user_feedback_callback: Optional[Callable[[dict], str]] = None,
         explainability: bool = False,
-        test_runner: Optional[Callable[[str, List[str], int], dict]] = None
+        test_runner: Optional[Callable[[str, List[str], int], dict]] = None,
+        plugins: Optional[List[Callable]] = None,
+        session_file: Optional[str] = None
     ):
         """
         Args:
@@ -51,7 +57,11 @@ class DebugAgent:
         self.test_runner = test_runner  # Custom test runner (e.g., pytest)
         self.planning_mode = planning_mode
         self.history: List[Dict[str, Any]] = []
-        self.metrics: Dict[str, Any] = {"fixes": 0, "successes": 0, "failures": 0, "confidences": []}
+        self.metrics: Dict[str, Any] = {"fixes": 0, "successes": 0, "failures": 0, "confidences": [], "api_calls": 0, "exec_times": [], "mem_usages": []}
+        self.plugins = plugins or []
+        self.session_file = session_file
+        if self.session_file and os.path.exists(self.session_file):
+            self._load_session()
 
     def run(self, code: str) -> dict:
         """
@@ -83,6 +93,9 @@ class DebugAgent:
             elif code_len < 200:
                 max_attempts = max(2, max_attempts - 1)
         for attempt in range(1, max_attempts + 1):
+            # Resource usage tracking
+            tracemalloc.start()
+            start_time = time.time()
             if self.verbose:
                 print(f"\n[ATTEMPT {attempt}]\nCode:\n{current_code}")
             # Step-by-step reasoning (planning mode)
@@ -95,9 +108,25 @@ class DebugAgent:
                 test_result = self.test_runner(current_code, self.test_cases, self.timeout_sec)
             else:
                 test_result = self._test_code(current_code)
+            # Code quality checks (linting)
+            lint_result = self._lint_code(current_code)
+            # Security auditing (bandit)
+            security_result = self._security_audit(current_code)
+            # Plugin hooks (validators, etc.)
+            for plugin in self.plugins:
+                plugin_result = plugin(current_code, self.history)
+                if plugin_result is not None and isinstance(plugin_result, dict):
+                    if self.verbose:
+                        print(f"[PLUGIN] {plugin.__name__}: {plugin_result}")
             if test_result["success"]:
                 conf = score_confidence(code, current_code, "", test_result)
                 explanation = self._get_explanation(code, current_code) if self.explainability else None
+                exec_time = time.time() - start_time
+                current, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                self.metrics["exec_times"].append(exec_time)
+                self.metrics["mem_usages"].append(peak)
+                self.metrics["api_calls"] += 1
                 entry = {
                     "attempt": attempt,
                     "proposed_fix": current_code,
@@ -105,7 +134,11 @@ class DebugAgent:
                     "confidence": conf,
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "plan": plan if self.planning_mode else None,
-                    "explanation": explanation
+                    "explanation": explanation,
+                    "lint": lint_result,
+                    "security": security_result,
+                    "exec_time": exec_time,
+                    "mem_usage": peak
                 }
                 self.history.append(entry)
                 self.metrics["fixes"] += 1
@@ -115,6 +148,8 @@ class DebugAgent:
                 if self.user_feedback_callback:
                     feedback = self.user_feedback_callback(entry)
                     entry["user_feedback"] = feedback
+                if self.session_file:
+                    self._save_session()
                 return {
                     "final_code": current_code,
                     "success": True,
@@ -126,6 +161,12 @@ class DebugAgent:
             else:
                 conf = score_confidence(code, current_code, test_result["error"], test_result)
                 explanation = self._get_explanation(code, current_code) if self.explainability else None
+                exec_time = time.time() - start_time
+                current, peak = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                self.metrics["exec_times"].append(exec_time)
+                self.metrics["mem_usages"].append(peak)
+                self.metrics["api_calls"] += 1
                 entry = {
                     "attempt": attempt,
                     "proposed_fix": current_code,
@@ -133,7 +174,11 @@ class DebugAgent:
                     "confidence": conf,
                     "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "plan": plan if self.planning_mode else None,
-                    "explanation": explanation
+                    "explanation": explanation,
+                    "lint": lint_result,
+                    "security": security_result,
+                    "exec_time": exec_time,
+                    "mem_usage": peak
                 }
                 self.history.append(entry)
                 self.metrics["fixes"] += 1
@@ -142,6 +187,8 @@ class DebugAgent:
                 if self.user_feedback_callback:
                     feedback = self.user_feedback_callback(entry)
                     entry["user_feedback"] = feedback
+                if self.session_file:
+                    self._save_session()
                 if not best or conf > best["confidence"]:
                     best = entry.copy()
                 # Parallel fix strategies (if provided)
@@ -204,7 +251,69 @@ class DebugAgent:
                 except Exception as e:
                     return f"[EXPLANATION ERROR] {e}"
         # After max attempts, return best
+        if self.session_file:
+            self._save_session()
         return {
+                def _lint_code(self, code: str) -> dict:
+                    """
+                    Run flake8 and pylint on the code and return results.
+                    """
+                    result = {}
+                    try:
+                        with open(".tmp_lint.py", "w") as f:
+                            f.write(code)
+                        flake8 = subprocess.run(["flake8", ".tmp_lint.py"], capture_output=True, text=True)
+                        pylint = subprocess.run(["pylint", "--disable=all", "--enable=errors", ".tmp_lint.py"], capture_output=True, text=True)
+                        result["flake8"] = flake8.stdout + flake8.stderr
+                        result["pylint"] = pylint.stdout + pylint.stderr
+                    except Exception as e:
+                        result["error"] = str(e)
+                    finally:
+                        try:
+                            os.remove(".tmp_lint.py")
+                        except Exception:
+                            pass
+                    return result
+
+                def _security_audit(self, code: str) -> dict:
+                    """
+                    Run bandit security scan on the code and return results.
+                    """
+                    result = {}
+                    try:
+                        with open(".tmp_bandit.py", "w") as f:
+                            f.write(code)
+                        bandit = subprocess.run(["bandit", "-r", ".tmp_bandit.py", "-f", "json"], capture_output=True, text=True)
+                        result["bandit"] = bandit.stdout + bandit.stderr
+                    except Exception as e:
+                        result["error"] = str(e)
+                    finally:
+                        try:
+                            os.remove(".tmp_bandit.py")
+                        except Exception:
+                            pass
+                    return result
+
+                def _save_session(self):
+                    try:
+                        with open(self.session_file, "wb") as f:
+                            pickle.dump({
+                                "history": self.history,
+                                "metrics": self.metrics
+                            }, f)
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"[SESSION SAVE ERROR] {e}")
+
+                def _load_session(self):
+                    try:
+                        with open(self.session_file, "rb") as f:
+                            data = pickle.load(f)
+                            self.history = data.get("history", [])
+                            self.metrics = data.get("metrics", self.metrics)
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"[SESSION LOAD ERROR] {e}")
             "final_code": best["proposed_fix"] if best else code,
             "success": False,
             "attempts": self.max_attempts,
