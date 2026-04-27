@@ -4,7 +4,36 @@
 A CLI tool that accepts buggy Python code, automatically attempts to fix it through an agentic loop (analyze → fix → test → retry up to 3 times), returns corrected code with confidence scores and an audit log.
 
 ## Architecture
-![diagram](assets/diagram.png)
+```mermaid
+flowchart TD
+    A[User provides buggy code<br/>(string or file)] --> B[Guardrails check<br/>guardrails.py]
+    B -->|Unsafe| C[Reject immediately<br/>return error + reason]
+    B -->|Safe| D[Initialize Agent Loop<br/>attempt = 1, history = []]
+    
+    D --> E{attempt <= max_attempts<br/>(max 3)?}
+    E -->|No, all attempts failed| F[Select best-effort fix<br/>(closest to passing)]
+    F --> G[Return final_code, log, confidence]
+
+    E -->|Yes| H[Execute code safely<br/>tester.safe_execute]
+    H --> I[Capture error / output]
+
+    I --> J[Send to LLM with prompt<br/>debugger.request_fix]
+    J --> K[LLM returns candidate fix<br/>(only code)]
+
+    K --> L[Test fixed code in sandbox<br/>tester.safe_execute]
+    L --> M{Does it pass?}
+    
+    M -->|Yes| N[Calculate confidence<br/>confidence.score_confidence]
+    N --> O[Return success: final_code, log, confidence]
+    
+    M -->|No| P[Log attempt to history<br/>store code, error, confidence]
+    P --> Q[attempt += 1]
+    Q --> E
+
+    O --> END([End])
+    C --> END
+    G --> END
+```
 
 ## Setup
 1. Clone the repo
