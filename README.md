@@ -1,46 +1,6 @@
 # Auto-Debugger: Self-Correcting Agentic Code Fixer
 
 ## Overview
-A CLI tool that accepts buggy Python code, automatically attempts to fix it through an agentic loop (analyze → fix → test → retry up to 3 times), returns corrected code with confidence scores and an audit log.
-
-## Architecture
-![diagram](assets/diagram.png)
-
-## Setup
-1. Clone the repo
-2. `pip install -r requirements.txt`
-3. Set your OpenAI API key in `.env` or as `OPENAI_API_KEY` env var
-
-## Usage
-```
-python -m src.main --file buggy.py
-python -m src.main --code "print(undefined)"
-python -m src.main --file buggy.py --verbose
-```
-
-## Design Decisions
-- 3 agent attempts max
-- LLM prompt returns only code
-- Guardrails block dangerous code
-- Confidence = test + LLM + similarity
-- Best-effort: return closest-to-passing fix
-
-## Testing
-Run all tests:
-```
-python tests/run_tests.py
-```
-
-## Reflection
-See `model_card.md` for model details, limitations, and AI collaboration log.
-
-## Loom Demo
-[Add Loom link here]
-##########################################################################################################################
-
-# Auto-Debugger: Self-Correcting Agentic Code Fixer
-
-## Overview
 A CLI tool that accepts buggy Python code and automatically attempts to fix it through an **agentic loop** (analyze → fix → test → retry up to 3 times). It returns corrected code with confidence scores and an audit log. This system solves the meaningful problem of reducing manual debugging time by letting an AI agent autonomously refine its own fixes.
 
 ## Base Project
