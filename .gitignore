@@ -1,0 +1,23 @@
+#packages 
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# JSON files
+*.json
+*.lock
+
+#.env files
+.env
