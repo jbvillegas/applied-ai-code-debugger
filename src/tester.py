@@ -11,12 +11,46 @@ try:
 except ImportError:
     resource = None
 
-from .guardrails import is_safe
+
+from src.guardrails import is_safe
 
 SAFE_BUILTINS = {
     'print': print, 'len': len, 'range': range, 'str': str, 'int': int, 'float': float, 'bool': bool,
     'list': list, 'dict': dict, 'set': set, 'tuple': tuple, 'enumerate': enumerate, 'abs': abs, 'min': min, 'max': max, 'sum': sum
 }
+
+
+def run_code_child(code, input_vars, output_limit, queue, resource_limits=True, timeout_sec=5):
+    start = time.time()
+    local_stdout = io.StringIO()
+    sys_stdout, sys_stderr = sys.stdout, sys.stderr
+    sys.stdout = sys.stderr = local_stdout
+    result = {"success": False, "output": "", "error": None, "error_type": None, "exec_time": 0, "meta": {}}
+    try:
+        # Set resource limits (Unix only)
+        if resource_limits and resource is not None:
+            resource.setrlimit(resource.RLIMIT_CPU, (max(1, int(timeout_sec)), max(1, int(timeout_sec))))
+            resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))  # 256MB
+            resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))  # 1MB file
+        safe_globals = {'__builtins__': SAFE_BUILTINS}
+        if input_vars:
+            safe_globals.update(input_vars)
+        exec(code, safe_globals, {})
+        result["success"] = True
+        out = local_stdout.getvalue()
+        if len(out) > output_limit:
+            out = out[:output_limit] + "\n...output truncated..."
+        result["output"] = out
+    except SyntaxError as e:
+        result["error"] = traceback.format_exc()
+        result["error_type"] = "SyntaxError"
+    except Exception as e:
+        result["error"] = traceback.format_exc()
+        result["error_type"] = "RuntimeError"
+    finally:
+        sys.stdout, sys.stderr = sys_stdout, sys_stderr
+        result["exec_time"] = round(time.time() - start, 4)
+        queue.put(result)
 
 def safe_execute(
     code: str,
@@ -41,40 +75,8 @@ def safe_execute(
         if not safe:
             return {"success": False, "output": "", "error": reason, "error_type": "Guardrail", "exec_time": 0, "meta": {}}
 
-    def run_code_child(code, input_vars, output_limit, queue):
-        start = time.time()
-        local_stdout = io.StringIO()
-        sys_stdout, sys_stderr = sys.stdout, sys.stderr
-        sys.stdout = sys.stderr = local_stdout
-        result = {"success": False, "output": "", "error": None, "error_type": None, "exec_time": 0, "meta": {}}
-        try:
-            # Set resource limits (Unix only)
-            if resource_limits and resource is not None:
-                resource.setrlimit(resource.RLIMIT_CPU, (max(1, int(timeout_sec)), max(1, int(timeout_sec))))
-                resource.setrlimit(resource.RLIMIT_AS, (256 * 1024 * 1024, 256 * 1024 * 1024))  # 256MB
-                resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))  # 1MB file
-            safe_globals = {'__builtins__': SAFE_BUILTINS}
-            if input_vars:
-                safe_globals.update(input_vars)
-            exec(code, safe_globals, {})
-            result["success"] = True
-            out = local_stdout.getvalue()
-            if len(out) > output_limit:
-                out = out[:output_limit] + "\n...output truncated..."
-            result["output"] = out
-        except SyntaxError as e:
-            result["error"] = traceback.format_exc()
-            result["error_type"] = "SyntaxError"
-        except Exception as e:
-            result["error"] = traceback.format_exc()
-            result["error_type"] = "RuntimeError"
-        finally:
-            sys.stdout, sys.stderr = sys_stdout, sys_stderr
-            result["exec_time"] = round(time.time() - start, 4)
-            queue.put(result)
-
     queue = multiprocessing.Queue()
-    proc = multiprocessing.Process(target=run_code_child, args=(code, input_vars, output_limit, queue))
+    proc = multiprocessing.Process(target=run_code_child, args=(code, input_vars, output_limit, queue, resource_limits, timeout_sec))
     proc.start()
     proc.join(timeout=timeout_sec)
     if proc.is_alive():

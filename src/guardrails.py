@@ -3,14 +3,14 @@ import ast
 
 # Expanded dangerous patterns (regex)
 DANGEROUS_PATTERNS = [
-    r'os\\.system', r'subprocess\\.', r'eval\\(', r'exec\\(', r'compile\\(',
-    r'__import__', r'open\\(.*[\'\"]w[\'\"]', r'rm ', r'del ', r'socket\\.', r'ftplib\\.',
-    r'shutil\\.', r'pickle\\.', r'input\\(', r'globals\\(', r'locals\\(', r'setattr\\(', r'getattr\\(',
+    r'os\.system', r'subprocess\.', r'eval\(', r'exec\(', r'compile\(',
+    r'__import__', r'open\(.*[\'\"]w[\'\"]', r'rm ', r'del ', r'socket\.', r'ftplib\.',
+    r'shutil\.', r'pickle\.', r'input\(', r'globals\(', r'locals\(', r'setattr\(', r'getattr\(',
     r'__dict__', r'__class__', r'__globals__', r'__subclasses__', r'__mro__', r'__code__', r'__base__',
-    r'Popen', r'fork', r'threading\\.', r'multiprocessing\\.', r'os\\.environ', r'os\\.walk', r'os\\.remove',
-    r'os\\.rmdir', r'os\\.unlink', r'os\\.chmod', r'os\\.chown', r'os\\.chroot', r'os\\.kill',
-    r'sys\\.exit', r'sys\\.modules', r'sys\\.path', r'sys\\.argv', r'base64\\.', r'binascii\\.',
-    r'ctypes\\.', r'__file__', r'__loader__', r'__package__', r'__builtins__', r'\bimport\b', r'\bfrom\b'
+    r'Popen', r'fork', r'threading\.', r'multiprocessing\.', r'os\.environ', r'os\.walk', r'os\.remove',
+    r'os\.rmdir', r'os\.unlink', r'os\.chmod', r'os\.chown', r'os\.chroot', r'os\.kill',
+    r'sys\.exit', r'sys\.modules', r'sys\.path', r'sys\.argv', r'base64\.', r'binascii\.',
+    r'ctypes\.', r'__file__', r'__loader__', r'__package__', r'__builtins__', r'\bimport\b', r'\bfrom\b'
 ]
 
 # Configurable blocklist for modules
@@ -68,6 +68,9 @@ def is_safe(code: str, extra_blocklist: set = None) -> tuple[bool, str]:
     # AST-based checks
     safe, reason = _ast_guardrails(code)
     if not safe:
+        # If the error is due to AST parse error (likely syntax), allow agent to attempt fix
+        if reason.startswith("Guardrail AST parse error"):
+            return True, "Warning: AST parse error, allowing agent to attempt fix."
         return False, reason
     # Unicode/obfuscation check
     if any(ord(c) > 127 for c in code):

@@ -1,5 +1,5 @@
+
 import difflib
-from .debugger import request_fix
 import openai
 import os
 
@@ -38,6 +38,8 @@ def score_confidence(
     Returns:
         Confidence score between 0 and 1.
     """
+    # Import here to avoid circular import
+    from src.debugger import request_fix
     base = 0.9 if test_result.get("success") else 0.4
     similarity = difflib.SequenceMatcher(None, original_code, fixed_code).ratio()
     if similarity > similarity_threshold:

@@ -1,12 +1,13 @@
+
 import time
 import pickle
 import os
 import subprocess
 import tracemalloc
-from .guardrails import is_safe
-from .tester import safe_execute
-from .debugger import request_fix
-from .confidence import score_confidence
+from src.guardrails import is_safe
+from src.tester import safe_execute
+from src.debugger import request_fix
+from src.confidence import score_confidence
 
 from typing import Optional, List, Dict, Any, Callable
 
@@ -69,16 +70,40 @@ class DebugAgent:
         Returns a dict with final_code, success, attempts, log, confidence, and metrics.
         """
         safe, reason = is_safe(code)
+        allow_fix_on_ast_error = False
         if not safe:
-            if self.verbose:
-                print(f"[GUARDRAIL] Blocked: {reason}")
+            # If the only issue is an AST parse error, allow agent to attempt a fix
+            if reason.startswith("Warning: AST parse error"):
+                allow_fix_on_ast_error = True
+            else:
+                if self.verbose:
+                    print(f"[GUARDRAIL] Blocked: {reason}")
+                return {
+                    "final_code": code,
+                    "success": False,
+                    "attempts": 0,
+                    "log": [],
+                    "confidence": 0.0,
+                    "error": reason,
+                    "metrics": self.metrics
+                }
+        # If not safe but allowed to fix on AST error, immediately call LLM to attempt a fix
+        if not safe and allow_fix_on_ast_error:
+            # Call the LLM to attempt a fix
+            attempt = 1
+            error_msg = reason
+            try:
+                fixed_code = self.fix_strategy(code, error_msg, attempt, [], **self.llm_params)
+            except Exception as e:
+                fixed_code = code
+                error_msg = f"LLM call failed: {e}"
             return {
-                "final_code": code,
-                "success": False,
-                "attempts": 0,
+                "final_code": fixed_code,
+                "success": False,  # Could optionally test the fixed code here
+                "attempts": 1,
                 "log": [],
                 "confidence": 0.0,
-                "error": reason,
+                "error": error_msg,
                 "metrics": self.metrics
             }
         attempt = 1
@@ -239,7 +264,7 @@ class DebugAgent:
                 Ask LLM to explain the changes made in the fix.
                 """
                 try:
-                    from .debugger import openai
+                    from src.debugger import openai
                     prompt = f"Explain in 1-2 sentences what was changed to fix the code.\nOriginal:\n{original_code}\nFixed:\n{fixed_code}\nExplanation:"
                     response = openai.ChatCompletion.create(
                         model=self.llm_params.get("model", "gpt-3.5-turbo"),
@@ -343,7 +368,7 @@ class DebugAgent:
         Ask LLM for a step-by-step plan for fixing the code (planning mode).
         """
         try:
-            from .debugger import openai
+            from src.debugger import openai
             plan_prompt = f"You are an expert Python debugger. Given the code below, outline a step-by-step plan to fix any errors.\nCODE:\n{code}\nPLAN:"
             response = openai.ChatCompletion.create(
                 model=self.llm_params.get("model", "gpt-3.5-turbo"),

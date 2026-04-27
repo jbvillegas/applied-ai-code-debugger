@@ -15,8 +15,15 @@ def main():
     elif args.code:
         code = args.code
     else:
-        print("Provide --file or --code.")
-        sys.exit(1)
+        print("Enter your Python code below. Press Ctrl-D (Ctrl-Z on Windows) when done:")
+        try:
+            code = sys.stdin.read()
+        except KeyboardInterrupt:
+            print("\nInput cancelled.")
+            sys.exit(1)
+        if not code.strip():
+            print("No code entered. Exiting.")
+            sys.exit(1)
 
     agent = DebugAgent()
     result = agent.run(code)

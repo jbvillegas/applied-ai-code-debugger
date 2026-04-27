@@ -1,8 +1,17 @@
+from dotenv import load_dotenv
+load_dotenv()
+
+
 import openai
 import os
+from src.confidence import score_confidence
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-openai.api_key = OPENAI_API_KEY
+# Try both possible env var names
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("OPEN_AI_API_KEY")
+if not OPENAI_API_KEY:
+    print("[ERROR] OpenAI API key not found. Please set OPENAI_API_KEY or OPEN_AI_API_KEY in your environment or .env file.")
+else:
+    openai.api_key = OPENAI_API_KEY
 
 PROMPT_TEMPLATE = """
 You are an expert Python debugger. Fix the code below.
